@@ -1,9 +1,9 @@
 use crate::OsLog;
-use dashmap::DashMap;
+use std::{sync::RwLock, collections::HashMap};
 use log::{LevelFilter, Log, Metadata, Record};
 
 pub struct OsLogger {
-    loggers: DashMap<String, (Option<LevelFilter>, OsLog)>,
+    loggers: RwLock<HashMap<String, (Option<LevelFilter>, OsLog)>>,
     subsystem: String,
 }
 
@@ -11,6 +11,8 @@ impl Log for OsLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
         let max_level = self
             .loggers
+            .read()
+            .expect("OsLog writer panicked")
             .get(metadata.target())
             .and_then(|pair| (*pair).0)
             .unwrap_or_else(log::max_level);
@@ -20,8 +22,12 @@ impl Log for OsLogger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            let pair = self
+            let mut loggers = 
+                self
                 .loggers
+                .write()
+                .expect("OsLog writer panicked");
+            let pair = loggers
                 .entry(record.target().into())
                 .or_insert((None, OsLog::new(&self.subsystem, record.target())));
 
@@ -38,7 +44,7 @@ impl OsLogger {
     /// By default the level filter will be set to `LevelFilter::Trace`.
     pub fn new(subsystem: &str) -> Self {
         Self {
-            loggers: DashMap::new(),
+            loggers: RwLock::new(HashMap::new()),
             subsystem: subsystem.to_string(),
         }
     }
@@ -52,6 +58,8 @@ impl OsLogger {
     /// Sets or updates the category's level filter.
     pub fn category_level_filter(self, category: &str, level: LevelFilter) -> Self {
         self.loggers
+            .write()
+            .expect("OsLog writer panicked")
             .entry(category.into())
             .and_modify(|(existing_level, _)| *existing_level = Some(level))
             .or_insert((Some(level), OsLog::new(&self.subsystem, category)));
